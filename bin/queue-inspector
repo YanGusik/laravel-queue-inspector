@@ -1,0 +1,106 @@
+#!/usr/bin/env php
+<?php
+
+$autoloadPaths = [
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../../autoload.php',
+];
+
+$autoloaded = false;
+foreach ($autoloadPaths as $path) {
+    if (file_exists($path)) {
+        require $path;
+        $autoloaded = true;
+        break;
+    }
+}
+
+if (!$autoloaded) {
+    fwrite(STDERR, "Could not find autoloader. Run 'composer install' first.\n");
+    exit(1);
+}
+
+use YanGusik\QueueInspector\Inspector;
+use YanGusik\QueueInspector\Output\JsonFormatter;
+use YanGusik\QueueInspector\Output\TextFormatter;
+use YanGusik\QueueInspector\Result\CheckResult;
+
+$opts = getopt('v', ['path:', 'strict', 'format:', 'no-guzzle', 'verbose', 'exclude-ns:', 'help']);
+
+if (isset($opts['help'])) {
+    echo <<<HELP
+queue-inspector — Laravel queue job configuration analyzer
+
+Usage:
+  vendor/bin/queue-inspector [options]
+
+Options:
+  --path=<dir>        Path to Laravel project root (default: current directory)
+  --strict            Exit with code 1 if any errors found (for CI/CD)
+  --format=<fmt>      Output format: text (default) or json
+  -v, --verbose       Show value sources (where each setting comes from)
+  --no-guzzle         Skip Guzzle HTTP timeout check
+  --exclude-ns=<ns>   Exclude namespace from discovery (repeatable)
+  --help              Show this help
+
+Examples:
+  vendor/bin/queue-inspector
+  vendor/bin/queue-inspector --strict
+  vendor/bin/queue-inspector -v
+  vendor/bin/queue-inspector --path=/var/www/my-app --strict
+  vendor/bin/queue-inspector --exclude-ns="App\\Notifications" --exclude-ns="App\\Events"
+  vendor/bin/queue-inspector --format=json | jq '.[] | select(.hasErrors)'
+
+HELP;
+    exit(0);
+}
+
+$projectRoot       = $opts['path'] ?? getcwd();
+$strict            = isset($opts['strict']);
+$format            = $opts['format'] ?? 'text';
+$verbose           = isset($opts['v']) || isset($opts['verbose']);
+$noGuzzle          = isset($opts['no-guzzle']);
+$excludedNamespaces = isset($opts['exclude-ns'])
+    ? (array) $opts['exclude-ns']
+    : [];
+
+if (!is_dir($projectRoot)) {
+    fwrite(STDERR, "Error: path '{$projectRoot}' is not a directory.\n");
+    exit(1);
+}
+
+if (!file_exists($projectRoot . '/vendor/autoload.php')) {
+    fwrite(STDERR, "Error: '{$projectRoot}' does not look like a Laravel project (no vendor/autoload.php).\n");
+    exit(1);
+}
+
+$inspector = new Inspector($projectRoot, !$noGuzzle, $excludedNamespaces);
+$result    = $inspector->analyze();
+
+if ($format === 'json') {
+    echo (new JsonFormatter())->format($result, $verbose) . PHP_EOL;
+} else {
+    $output        = (new TextFormatter())->format($result, $verbose);
+    $supportsColor = stream_isatty(STDOUT);
+
+    foreach (explode(PHP_EOL, $output) as $line) {
+        if (!$supportsColor) {
+            echo $line . PHP_EOL;
+            continue;
+        }
+
+        if (str_contains($line, '✗')) {
+            echo "\033[31m" . $line . "\033[0m" . PHP_EOL;
+        } elseif (str_contains($line, '⚠')) {
+            echo "\033[33m" . $line . "\033[0m" . PHP_EOL;
+        } elseif (str_contains($line, '✓')) {
+            echo "\033[32m" . $line . "\033[0m" . PHP_EOL;
+        } elseif (str_contains(ltrim($line), '·')) {
+            echo "\033[90m" . $line . "\033[0m" . PHP_EOL; // gray for detail lines
+        } else {
+            echo $line . PHP_EOL;
+        }
+    }
+}
+
+exit($strict && $result->hasErrors() ? 1 : 0);
