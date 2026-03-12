@@ -13,7 +13,6 @@ class AnalyzeCommand extends Command
     protected $signature = 'queue:analyze
         {--strict         : Exit with code 1 if any errors are found}
         {--format=text    : Output format (text|json)}
-        {--v|verbose      : Show value sources (where each setting comes from)}
         {--no-guzzle      : Skip Guzzle timeout check}
         {--exclude-ns=*   : Namespaces to exclude, e.g. App\\Notifications}';
 
@@ -24,7 +23,7 @@ class AnalyzeCommand extends Command
         $projectRoot       = base_path();
         $format            = $this->option('format');
         $strict            = $this->option('strict');
-        $verbose           = $this->option('verbose');
+        $verbose           = $this->output->isVerbose();
         $noGuzzle          = $this->option('no-guzzle');
         $excludedNamespaces = (array) $this->option('exclude-ns');
 
